@@ -1,111 +1,194 @@
-# Multi-Container Runtime
-
-A lightweight Linux container runtime in C with a long-running supervisor and a kernel-space memory monitor.
-
-Read [`project-guide.md`](project-guide.md) for the full project specification.
+# Multi-Container Runtime with Kernel Memory Monitor
 
 ---
 
-## Getting Started
+## 1. Team Information
 
-### 1. Fork the Repository
+* Name: ABHISHEK SRN: PES1UG24CS650
+* Name: BALREDDY SRN: PES1UG24CS658
 
-1. Go to [github.com/shivangjhalani/OS-Jackfruit](https://github.com/shivangjhalani/OS-Jackfruit)
-2. Click **Fork** (top-right)
-3. Clone your fork:
+---
 
-```bash
-git clone https://github.com/<your-username>/OS-Jackfruit.git
-cd OS-Jackfruit
-```
+## 2. Build, Load, and Run Instructions
 
-### 2. Set Up Your VM
+### Prerequisites
 
-You need an **Ubuntu 22.04 or 24.04** VM with **Secure Boot OFF**. WSL will not work.
-
-Install dependencies:
+Ubuntu 22.04 / 24.04 VM with Secure Boot OFF
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential linux-headers-$(uname -r)
 ```
 
-### 3. Run the Environment Check
+---
 
-```bash
-cd boilerplate
-chmod +x environment-check.sh
-sudo ./environment-check.sh
-```
-
-Fix any issues reported before moving on.
-
-### 4. Prepare the Root Filesystem
+### Prepare Root Filesystem
 
 ```bash
 mkdir rootfs-base
 wget https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
 tar -xzf alpine-minirootfs-3.20.3-x86_64.tar.gz -C rootfs-base
 
-# Make one writable copy per container you plan to run
-cp -a ./rootfs-base ./rootfs-alpha
-cp -a ./rootfs-base ./rootfs-beta
+cp -a rootfs-base rootfs-alpha
+cp -a rootfs-base rootfs-beta
 ```
 
-Do not commit `rootfs-base/` or `rootfs-*` directories to your repository.
+---
 
-### 5. Understand the Boilerplate
-
-The `boilerplate/` folder contains starter files:
-
-| File                   | Purpose                                             |
-| ---------------------- | --------------------------------------------------- |
-| `engine.c`             | User-space runtime and supervisor skeleton          |
-| `monitor.c`            | Kernel module skeleton                              |
-| `monitor_ioctl.h`      | Shared ioctl command definitions                    |
-| `Makefile`             | Build targets for both user-space and kernel module |
-| `cpu_hog.c`            | CPU-bound test workload                             |
-| `io_pulse.c`           | I/O-bound test workload                             |
-| `memory_hog.c`         | Memory-consuming test workload                      |
-| `environment-check.sh` | VM environment preflight check                      |
-
-Use these as your starting point. You are free to restructure the repository however you want — the submission requirements are listed in the project guide.
-
-### 6. Build and Verify
+### Build Project
 
 ```bash
 cd boilerplate
 make
 ```
 
-If this compiles without errors, your environment is ready.
+---
 
-### 7. GitHub Actions Smoke Check
-
-Your fork will inherit a minimal GitHub Actions workflow from this repository.
-
-That workflow only performs CI-safe checks:
-
-- `make -C boilerplate ci`
-- user-space binary compilation (`engine`, `memory_hog`, `cpu_hog`, `io_pulse`)
-- `./boilerplate/engine` with no arguments must print usage and exit with a non-zero status
-
-The CI-safe build command is:
+### Copy Workloads
 
 ```bash
-make -C boilerplate ci
-```
+cp boilerplate/cpu_hog rootfs-alpha/
+cp boilerplate/memory_hog rootfs-alpha/
+cp boilerplate/io_pulse rootfs-alpha/
 
-This smoke check does not test kernel-module loading, supervisor runtime behavior, or container execution.
+cp boilerplate/cpu_hog rootfs-beta/
+
+chmod +x rootfs-alpha/*
+chmod +x rootfs-beta/*
+```
 
 ---
 
-## What to Do Next
+### Load Kernel Module
 
-Read [`project-guide.md`](project-guide.md) end to end. It contains:
+```bash
+cd boilerplate
+sudo insmod monitor.ko
+cat /proc/devices | grep container_monitor
+sudo mknod /dev/container_monitor c <major_number> 0
+sudo chmod 666 /dev/container_monitor
+```
 
-- The six implementation tasks (multi-container runtime, CLI, logging, kernel monitor, scheduling experiments, cleanup)
-- The engineering analysis you must write
-- The exact submission requirements, including what your `README.md` must contain (screenshots, analysis, design decisions)
+---
 
-Your fork's `README.md` should be replaced with your own project documentation as described in the submission package section of the project guide. (As in get rid of all the above content and replace with your README.md)
+### Start Containers
+
+```bash
+sudo ./engine start alpha /home/abhishek/OS-Jackfruit/rootfs-alpha "/cpu_hog 120"
+sudo ./engine start beta /home/abhishek/OS-Jackfruit/rootfs-beta "/cpu_hog 120"
+```
+
+---
+
+### Check Container Status
+
+```bash
+sudo ./engine ps
+```
+
+---
+
+### View Logs
+
+```bash
+sudo ./engine logs alpha
+```
+
+---
+
+### Memory Limit Test
+
+```bash
+sudo ./engine start memtest /home/abhishek/OS-Jackfruit/rootfs-alpha "/memory_hog 2 500"
+sleep 20
+sudo dmesg | grep container_monitor
+```
+
+---
+
+### Cleanup
+
+```bash
+ps aux | grep -E 'defunct|zombie'
+sudo rmmod monitor
+lsmod | grep monitor
+```
+
+---
+
+## 3. 📸 Screenshots
+
+Screenshots demonstrating the working of the system are included in the `screenshots/` folder.
+
+They cover the following aspects:
+
+* Multi-container execution (multiple containers running simultaneously)
+* Container metadata tracking using `engine ps`
+* Logging output using `engine logs`
+* Soft limit warnings generated by the kernel module
+* Hard limit enforcement (container termination)
+* Clean teardown with no zombie or defunct processes
+
+---
+
+## 4. Engineering Analysis
+
+### 1. Container Execution
+
+Containers are created using the `clone()` system call and executed with isolated root filesystems using `chroot()`. Each container runs independently with its own process space.
+
+---
+
+### 2. Memory Monitoring
+
+The kernel module tracks memory usage of each container using RSS values. When memory usage crosses:
+
+* Soft limit → warning is logged
+* Hard limit → process is terminated using `SIGKILL`
+
+---
+
+### 3. Logging Mechanism
+
+Container output is captured using pipes and displayed through the `engine logs` command. Kernel logs (`dmesg`) are also used to monitor system-level events.
+
+---
+
+### 4. Process Management
+
+The runtime maintains container metadata such as ID, PID, and state. This is displayed using the `engine ps` command.
+
+---
+
+### 5. Limitations
+
+* No full supervisor-based IPC implementation
+* No advanced scheduling control (nice values)
+* Logging is basic (no bounded buffer)
+
+---
+
+## 5. Design Decisions
+
+* Lightweight runtime using minimal system calls
+* chroot-based isolation for simplicity
+* Kernel-based enforcement for reliable memory control
+* CLI-based interaction instead of complex IPC
+
+---
+
+## 6. Conclusion
+
+This project demonstrates:
+
+* Multi-container execution
+* Kernel-level memory monitoring
+* Resource limit enforcement
+* Basic container logging
+
+---
+
+## 7. Author
+
+Abhishek Deene
+
