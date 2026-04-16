@@ -186,9 +186,4 @@ This project demonstrates:
 * Resource limit enforcement
 * Basic container logging
 
----
-
-## 7. Author
-
-Abhishek Deene
 
